@@ -2,6 +2,11 @@
 
 **An agentic system that reads a machine learning paper's methodology, reconstructs the described model, trains it on real data, and produces an honest verdict on whether the paper's results reproduce.**
 
+
+
+<img width="1386" height="833" alt="Screenshot 2026-09-02 231758" src="https://github.com/user-attachments/assets/9e56c1ea-60c5-4451-8c05-0a9b0a988077" />
+<img width="1402" height="682" alt="Screenshot 2026-09-02 231747" src="https://github.com/user-attachments/assets/2ee8e59d-2cb8-449c-acc7-669133c18341" />
+<img width="1399" height="342" alt="Screenshot 2026-09-02 231809" src="https://github.com/user-attachments/assets/3aaa9091-eabe-4f39-8b08-67d2bfc1b1db" />
 ---
 
 ## Why I built this
