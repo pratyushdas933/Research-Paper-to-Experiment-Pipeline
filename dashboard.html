@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Paper-to-Experiment Pipeline — Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1117;
+    --panel: #171a23;
+    --border: #2a2e3a;
+    --text: #e6e8ee;
+    --muted: #9aa1b2;
+    --accent: #6ea8fe;
+    --good: #4ade80;
+    --bad: #f87171;
+    --warn: #fbbf24;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 32px;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); font-size: 14px; margin-bottom: 28px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .full { grid-column: 1 / -1; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  .card h2 { font-size: 15px; margin: 0 0 14px 0; color: var(--accent); text-transform: uppercase; letter-spacing: 0.5px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 500; }
+  code { background: #0d0f15; padding: 2px 6px; border-radius: 4px; font-size: 12px; color: #c7d2fe; }
+  pre { background: #0d0f15; padding: 14px; border-radius: 8px; overflow-x: auto; font-size: 12px; line-height: 1.5; }
+  .badge {
+    display: inline-block; padding: 4px 10px; border-radius: 999px;
+    font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px;
+  }
+  .badge.reproduced { background: rgba(74,222,128,0.15); color: var(--good); }
+  .badge.not_comparable { background: rgba(251,191,36,0.15); color: var(--warn); }
+  .badge.not_reproduced_extraction_gap,
+  .badge.not_reproduced_assumption_gap { background: rgba(251,191,36,0.15); color: var(--warn); }
+  .badge.not_reproduced_unexplained { background: rgba(248,113,113,0.15); color: var(--bad); }
+  .factor-list { list-style: none; padding: 0; margin: 10px 0 0 0; font-size: 13px; }
+  .factor-list li { padding: 6px 0; border-bottom: 1px solid var(--border); color: var(--muted); }
+  .factor-list li:last-child { border-bottom: none; }
+  .metric-row { display: flex; gap: 24px; margin-top: 10px; }
+  .metric { flex: 1; text-align: center; padding: 14px; background: #0d0f15; border-radius: 8px; }
+  .metric .value { font-size: 24px; font-weight: 700; }
+  .metric .label { font-size: 11px; color: var(--muted); text-transform: uppercase; margin-top: 4px; }
+  .excerpt { font-size: 13px; color: var(--muted); font-style: italic; line-height: 1.6; border-left: 3px solid var(--border); padding-left: 14px; }
+  #loading { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Research-Paper-to-Experiment Pipeline</h1>
+  <div class="subtitle" id="paper-subtitle">Loading...</div>
+  <div id="loading">Reading dashboard_data.json...</div>
+  <div id="content" style="display:none;">
+
+    <div class="card">
+      <h2>Source Paper</h2>
+      <div class="excerpt" id="paper-excerpt"></div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h2>Extracted Model IR</h2>
+        <table id="ir-table">
+          <thead><tr><th>Layer</th><th>Type</th><th>Params</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div id="unsupported-box" style="margin-top:14px;"></div>
+      </div>
+
+      <div class="card">
+        <h2>Generated PyTorch Model</h2>
+        <pre id="model-arch"></pre>
+        <div id="dataset-info" style="margin-top:10px; font-size:13px; color:var(--muted);"></div>
+      </div>
+    </div>
+
+    <div class="card full">
+      <h2>Training Curve</h2>
+      <canvas id="training-chart" height="90"></canvas>
+      <div class="metric-row" id="final-metrics"></div>
+    </div>
+
+    <div class="card full">
+      <h2>Reproducibility Verdict</h2>
+      <div id="verdict-badge"></div>
+      <p id="verdict-summary" style="margin-top:12px; line-height:1.6;"></p>
+      <ul class="factor-list" id="verdict-factors"></ul>
+    </div>
+
+  </div>
+</div>
+
+<script>
+fetch('dashboard_data.json')
+  .then(r => {
+    if (!r.ok) throw new Error('dashboard_data.json not found -- run generate_dashboard_data.py first');
+    return r.json();
+  })
+  .then(data => render(data))
+  .catch(err => {
+    document.getElementById('loading').textContent = 'Error: ' + err.message;
+  });
+
+function render(data) {
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('content').style.display = 'block';
+
+  document.getElementById('paper-subtitle').textContent = data.paper.source;
+  document.getElementById('paper-excerpt').textContent = '"' + data.paper.excerpt + '"';
+
+  const irBody = document.querySelector('#ir-table tbody');
+  data.extracted_ir.layers.forEach(l => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td><code>${l.id}</code></td><td>${l.type}</td><td>${JSON.stringify(l.params)}</td>`;
+    irBody.appendChild(tr);
+  });
+
+  const unsupported = data.extracted_ir.unsupported_elements || [];
+  if (unsupported.length) {
+    const box = document.getElementById('unsupported-box');
+    box.innerHTML = '<div style="color:var(--warn); font-size:12px; margin-bottom:6px;">UNSUPPORTED / SKIPPED DURING EXTRACTION</div>' +
+      '<ul class="factor-list">' + unsupported.map(u => `<li>${u}</li>`).join('') + '</ul>';
+  }
+
+  document.getElementById('model-arch').textContent = data.model_architecture;
+  document.getElementById('dataset-info').textContent =
+    `Dataset: ${data.dataset.label} — ${data.dataset.n_train} train / ${data.dataset.n_val} val rows, ${data.dataset.feature_names.length} features`;
+
+  const history = data.training_history;
+  new Chart(document.getElementById('training-chart'), {
+    type: 'line',
+    data: {
+      labels: history.map(h => h.epoch),
+      datasets: [
+        { label: 'Train Accuracy', data: history.map(h => h.train_accuracy), borderColor: '#6ea8fe', tension: 0.2 },
+        { label: 'Val Accuracy', data: history.map(h => h.val_accuracy), borderColor: '#4ade80', tension: 0.2 },
+      ]
+    },
+    options: {
+      responsive: true,
+      scales: {
+        y: { min: 0, max: 1, grid: { color: '#2a2e3a' }, ticks: { color: '#9aa1b2' } },
+        x: { grid: { color: '#2a2e3a' }, ticks: { color: '#9aa1b2' } }
+      },
+      plugins: { legend: { labels: { color: '#e6e8ee' } } }
+    }
+  });
+
+  const metricsDiv = document.getElementById('final-metrics');
+  metricsDiv.innerHTML = `
+    <div class="metric"><div class="value">${(data.final_train_accuracy*100).toFixed(1)}%</div><div class="label">Final Train Acc</div></div>
+    <div class="metric"><div class="value">${(data.final_val_accuracy*100).toFixed(1)}%</div><div class="label">Final Val Acc</div></div>
+    <div class="metric"><div class="value">${data.verdict.reported_metric != null ? (data.verdict.reported_metric*100).toFixed(1)+'%' : 'N/A'}</div><div class="label">Paper Reported</div></div>
+  `;
+
+  const badge = document.getElementById('verdict-badge');
+  const label = data.verdict.label;
+  badge.innerHTML = `<span class="badge ${label}">${label.replaceAll('_',' ')}</span>`;
+  document.getElementById('verdict-summary').textContent = data.verdict.summary;
+
+  const factorsList = document.getElementById('verdict-factors');
+  (data.verdict.contributing_factors || []).forEach(f => {
+    const li = document.createElement('li');
+    li.textContent = f;
+    factorsList.appendChild(li);
+  });
+}
+</script>
+</body>
+</html>
